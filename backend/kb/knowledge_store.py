@@ -18,6 +18,7 @@ from rank_bm25 import BM25Okapi
 from backend.config import KB_DIR, RAW_DIR, UPLOAD_DIR, VECTORSTORE_DIR, TOP_K
 from backend.rag.splitter import split_texts
 from backend.rag.embeddings import get_embeddings
+from backend.kb import user_kb
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+|[一-鿿]")
 
@@ -101,16 +102,47 @@ def load_raw() -> tuple[list[str], list[dict]]:
 
 
 def build_documents() -> list[Document]:
-    """把原始文本转换为 LangChain Document（FAQ 整体成块，普通文本切分）。"""
+    """把原始文本 + 用户知识库转换为 LangChain Document。
+
+    - 种子语料（kb/ 下文件）按稳定 id `seed::{i}` 编号，排除 excluded 列表中的条目
+    - 用户条目用 id `user::{entry_id}`，富文本 HTML 已转为纯文本
+    - 每条 Document 的 metadata._id / _title 用于条目级管理与前端展示
+    """
     texts, metas = load_raw()
     documents: list[Document] = []
+    excluded = set(user_kb.load_excluded())
+    idx = 0
     for t, m in zip(texts, metas):
+        sid = f"seed::{idx}"
+        idx += 1
+        if sid in excluded:
+            continue
+        title = m.get("question") or (t[:40])
         if m.get("type") == "faq":
-            documents.append(Document(page_content=t, metadata=m))
+            documents.append(Document(
+                page_content=t,
+                metadata={**m, "_id": sid, "_title": title},
+            ))
         else:
             st, sm = split_texts([t], [m])
             for c, cm in zip(st, sm):
-                documents.append(Document(page_content=c, metadata=cm))
+                documents.append(Document(
+                    page_content=c,
+                    metadata={**cm, "_id": sid, "_title": m.get("source", "doc")},
+                ))
+    # 用户知识库
+    for e in user_kb.load_user():
+        documents.append(Document(
+            page_content=e["text"] or e["title"],
+            metadata={
+                "source": "用户知识库",
+                "type": "user",
+                "_id": "user::" + e["id"],
+                "_title": e["title"] or (e["text"][:40]),
+                "_html": e.get("html", ""),
+                "_created": e.get("created_at", ""),
+            },
+        ))
     return documents
 
 
@@ -120,12 +152,14 @@ class KnowledgeStore:
     def __init__(self):
         self.built_at = None
         self.docs: list[Document] = []
+        self._ids: list[str] = []
         self._bm25 = None
         self._vectorstore: Chroma | None = None
         self._build()
 
     def _build(self):
         self.docs = build_documents()
+        self._ids = [d.metadata.get("_id", f"doc{i}") for i, d in enumerate(self.docs)]
         # BM25 关键词索引（始终构建）
         if self.docs:
             self._bm25 = BM25Okapi([tokenize(d.page_content) for d in self.docs])
@@ -149,9 +183,7 @@ class KnowledgeStore:
                 embedding_function=embed,
                 persist_directory=VECTORSTORE_DIR,
             )
-            self._vectorstore.add_documents(
-                self.docs, ids=[f"doc{i}" for i in range(len(self.docs))]
-            )
+            self._vectorstore.add_documents(self.docs, ids=self._ids)
         except Exception as e:
             print(f"[warn] Chroma 向量索引构建失败，将仅使用 BM25：{e}")
             self._vectorstore = None
@@ -176,10 +208,56 @@ class KnowledgeStore:
     def get_vectorstore(self) -> Chroma | None:
         return self._vectorstore
 
+    # ---------------- 条目级管理（供前端知识库面板） ----------------
+
+    def list_entries(self) -> list[dict]:
+        """返回条目级清单（按 _id 去重，FAQ 多分块归并到同一 _id）。"""
+        seen: set[str] = set()
+        out: list[dict] = []
+        for d in self.docs:
+            mid = d.metadata.get("_id", "")
+            if mid in seen:
+                continue
+            seen.add(mid)
+            kind = "user" if mid.startswith("user::") else "seed"
+            out.append({
+                "id": mid,
+                "title": d.metadata.get("_title") or d.page_content[:40],
+                "snippet": d.page_content[:140],
+                "kind": kind,
+                "source": d.metadata.get("source", ""),
+                "html": d.metadata.get("_html", ""),
+                "created": d.metadata.get("_created", ""),
+            })
+        return out
+
+    def delete_entry(self, eid: str) -> bool:
+        if eid.startswith("user::"):
+            ok = user_kb.delete_user_entry(eid.split("::", 1)[1])
+        else:
+            user_kb.exclude_seed(eid)
+            ok = True
+        if ok:
+            self._build()
+        return ok
+
+    def add_user_entry(self, title: str, html: str) -> dict:
+        entry = user_kb.add_entry(title, html)
+        self._build()
+        return entry
+
+    def update_user_entry(self, eid: str, title: str, html: str) -> dict | None:
+        entry = user_kb.update_entry(eid, title, html)
+        if entry:
+            self._build()
+        return entry
+
     def stats(self) -> dict:
+        user_n = len([d for d in self.docs if d.metadata.get("_id", "").startswith("user::")])
         return {
             "documents": len({d.metadata.get("source") for d in self.docs}),
             "chunks": len(self.docs),
+            "user_entries": user_n,
             "vector_enabled": self._vectorstore is not None,
             "built_at": self.built_at,
         }
