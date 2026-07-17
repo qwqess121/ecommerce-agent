@@ -162,7 +162,7 @@ export default function App() {
           sources: meta.sources,
           transfer: meta.transfer,
         }),
-      onDelta: (d) => patchMsg(sid, aid, (m) => ({ text: m.text + d })),
+      onDelta: (d) => patchMsg(sid, aid, (m) => ({ ...m, text: m.text + d })),
       onError: (err) => {
         setConnError(true)
         patchMsg(sid, aid, {

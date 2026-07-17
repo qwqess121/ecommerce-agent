@@ -12,6 +12,7 @@ LOGISTICS_VERB = [
 HUMAN_KW = ["人工", "转人工", "客服人员", "真人", "human agent", "转接"]
 GREET_KW = ["你好", "您好", "hi", "hello", "在吗", "在么", "哈喽"]
 THANKS_KW = ["谢谢", "感谢", "thanks", "thank you", "多谢"]
+IDENTITY_KW = ["你叫什么", "你叫啥", "你是谁", "你名字", "你的名字", "怎么称呼", "你是机器人", "你是人工", "你是智能客服", "你是什么", "介绍一下自己"]
 # 电商主题词：命中则倾向走知识库；都不命中且非问候致谢，视为闲聊/无关
 # 同时覆盖中英文，便于对开源英文语料做检索问答
 ECOM_KW = [
@@ -39,6 +40,9 @@ def classify(message: str) -> str:
         return "business"
 
     if any(k in t for k in GREET_KW) or any(k in t for k in THANKS_KW):
+        return "chitchat"
+
+    if any(k in t for k in IDENTITY_KW):
         return "chitchat"
 
     # 含电商主题词 -> 知识问答；否则视为闲聊/无关，避免强行用知识库答非所问
