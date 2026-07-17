@@ -1,0 +1,20 @@
+# Render Blueprint — 电商客服智能体
+# 使用方法：把本仓库推到 GitHub 后，在 Render 控制台「New」→「Blueprint」连接仓库，
+# Render 会自动读取本文件完成配置并部署。部署后获得公开 URL，任何人可访问。
+services:
+  - type: web
+    name: ecommerce-cs-agent
+    runtime: python
+    plan: free                      # 免费额度；如需更高并发可改 standard
+    pythonVersion: "3.13"
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn backend.app:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /health
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      # 可选：填入真实大模型 Key 后切换为「真实回答」模式（留空则默认 Mock 演示模式）
+      # - key: LLM_API_KEY
+      #   sync: false
+      # - key: LLM_PROVIDER
+      #   value: "deepseek"

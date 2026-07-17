@@ -1,0 +1,23 @@
+# ===== 项目内部数据（不部署） =====
+.workbuddy/
+
+# ===== 构建产物（部署时由 kb/ 自动重建） =====
+vectorstore/
+__pycache__/
+*.pyc
+
+# ===== 日志 =====
+*.log
+
+# ===== 用户上传（临时文件，不入库） =====
+kb/uploads/
+
+# ===== 本地密钥 / 虚拟环境（勿提交） =====
+.env
+venv/
+.venv/
+env/
+
+# ===== Python 缓存 =====
+.pytest_cache/
+.mypy_cache/
