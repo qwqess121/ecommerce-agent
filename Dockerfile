@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     HOST=0.0.0.0 \
-    PORT=8080
+    PORT=7860
 
 WORKDIR /app
 
@@ -26,7 +26,7 @@ COPY . .
 # 确保运行时可写目录存在（Chroma 向量库、上传目录）
 RUN mkdir -p /app/vectorstore /app/kb/uploads
 
-EXPOSE 8080
+EXPOSE 7860
 
-# 监听 $PORT（Cloudflare/HF 会传入），默认 8080
-CMD ["sh", "-c", "uvicorn backend.app:app --host 0.0.0.0 --port ${PORT:-8080}"]
+# 监听 $PORT（Cloudflare/HF 会传入），默认 7860
+CMD ["sh", "-c", "uvicorn backend.app:app --host 0.0.0.0 --port ${PORT:-7860}"]
