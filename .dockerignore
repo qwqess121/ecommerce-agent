@@ -1,0 +1,20 @@
+# 不纳入镜像的内容（减小体积、避免泄露）
+.git
+.gitignore
+.workbuddy
+__pycache__
+*.pyc
+node_modules
+frontend/node_modules
+frontend/src
+frontend/public
+.env
+*.log
+# 运行时生成的向量库/上传文件（容器内会重建；如需持久化请挂 Volume 到 /app/vectorstore）
+vectorstore
+kb/uploads
+kb/user_entries.json
+kb/excluded_seed.json
+# 本地开发用
+venv
+.venv
