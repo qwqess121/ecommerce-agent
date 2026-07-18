@@ -211,8 +211,20 @@ button { font-family: inherit; }
 .msg.bot .bubble { background: var(--bot-bubble); border: 1px solid var(--border); border-top-left-radius: 4px; color: var(--bot-text); }
 .msg.user .bubble { background: var(--user-bubble); color: #fff; border-top-right-radius: 4px; }
 
-.meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; }
+.meta { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 9px; align-items: center; }
 .tag { font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600; background: #eef1f6; color: var(--text-soft); }
+.fb { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+.fb.up { background: #dcfce7; color: #15803d; }
+.fb.down { background: #fee2e2; color: #b91c1c; }
+
+.msg-actions { display: flex; gap: 6px; margin-top: 8px; }
+.mini {
+  font-size: 12px; padding: 3px 9px; border-radius: 8px; border: 1px solid var(--border);
+  background: var(--panel); color: var(--text-soft); cursor: pointer; line-height: 1.4;
+  transition: all 0.12s;
+}
+.mini:hover { border-color: var(--brand); color: var(--brand); }
+.mini.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-ink); }
 .tag.knowledge { background: var(--tag-knowledge-bg); color: var(--tag-knowledge-fg); }
 .tag.business { background: var(--tag-business-bg); color: var(--tag-business-fg); }
 .tag.chitchat { background: var(--tag-chitchat-bg); color: var(--tag-chitchat-fg); }

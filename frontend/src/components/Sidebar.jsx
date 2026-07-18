@@ -8,6 +8,7 @@ export default function Sidebar({
   onDelete,
   stats,
   onOpenKb,
+  onExport,
 }) {
   return (
     <aside className="sidebar">
@@ -21,6 +22,10 @@ export default function Sidebar({
 
       <button className="btn btn-primary btn-block" onClick={onNew}>
         ＋ 新建对话
+      </button>
+
+      <button className="btn btn-sm btn-block" onClick={onExport} title="导出当前对话为 Markdown">
+        ⬇ 导出对话
       </button>
 
       <div className="sessions-head">

@@ -1,13 +1,10 @@
-"""智能体编排：使用 LangGraph 构建状态机。
+"""智能体编排：确定性规划器（路由 + 检索 + 生成分派）。
 
-节点：guard_route（护栏+路由） -> rag / business / chitchat / handoff（转人工）
-条件边按意图分派；blocked 直接结束并返回拒答。
-RAG 节点内部调用 LangChain 混合检索 + LCEL 生成链。
+- 意图路由：知识问答 / 业务查询 / 闲聊 / 转人工 / 拦截
+- 知识问答：LangChain 混合检索（Chroma 向量 + BM25）-> LCEL 生成链
+- 真实 LLM 模式可经 /chat/stream 逐 token 流出；mock 模式抽取式作答
+LangChain 核心组件：langchain_chroma(VectorStore)、EnsembleRetriever、LCEL(PROMPT|llm|StrOutputParser)、@tool(业务工具)。
 """
-from typing import Optional, TypedDict
-
-from langgraph.graph import StateGraph, START, END
-
 from backend.config import USE_MOCK_LLM
 from backend.agent.memory import ConversationMemory
 from backend.agent.router import classify
@@ -25,17 +22,6 @@ CHITCHAT_REPLIES = {
     "thanks": "不客气，能帮到您是我的荣幸！如果还有其他问题，随时找我哦～",
     "default": "您好，我是智能客服小智。您可以问我关于商品、订单、物流、退换货等问题，也可以要求转接人工客服。",
 }
-
-
-class AgentState(TypedDict, total=False):
-    session_id: str
-    last_user: str
-    history: str
-    intent: str
-    answer: str
-    sources: list
-    transfer: bool
-    blocked: bool
 
 
 def _sources_from(contexts, n=3):
@@ -73,108 +59,77 @@ def _handle_chitchat(message: str):
     return CHITCHAT_REPLIES["default"], False
 
 
-# ---------------- LangGraph 节点 ----------------
+# ---------------- 编排（确定性规划器） ----------------
 
-def guard_route(state: AgentState) -> dict:
-    msg = state.get("last_user", "")
-    blocked, reason = pre_check(msg)
+
+def plan(session_id: str, message: str) -> dict:
+    """路由 + 检索的「规划」阶段，供 handle() 与流式接口复用。
+
+    返回：{ intent, answer, sources, transfer, contexts, blocked }
+    - 知识问答：answer 为 None（需后续生成），contexts 为检索结果
+    - 业务/闲聊/转人工/拦截：answer 已确定，contexts 为空
+    """
+    message = (message or "").strip()
+    blocked, reason = pre_check(message)
     if blocked:
         return {
-            "blocked": True,
             "intent": "blocked",
             "answer": safe_refuse(reason),
-            "transfer": False,
             "sources": [],
+            "transfer": False,
+            "contexts": [],
+            "blocked": True,
         }
-    return {"intent": classify(msg), "blocked": False}
-
-
-def rag_node(state: AgentState) -> dict:
-    msg = state.get("last_user", "")
-    contexts = hybrid_retrieve(msg)
-    answer = generate(msg, contexts, state.get("history", ""))
-    sources = _sources_from(contexts)
+    intent = classify(message)
+    contexts: list = []
     transfer = False
-    if not is_relevant(contexts, msg):
-        answer = (
-            "抱歉，我在知识库中没有找到关于该问题的确切信息，"
-            "为避免给您错误答复，建议转接人工客服。"
-        )
+    answer = None
+    if intent == "knowledge":
+        contexts = hybrid_retrieve(message)
+        if not is_relevant(contexts, message):
+            answer = (
+                "抱歉，我在知识库中没有找到关于该问题的确切信息，"
+                "为避免给您错误答复，建议转接人工客服。"
+            )
+            transfer = True
+    elif intent == "business":
+        answer, transfer = _handle_business(message)
+    elif intent == "human":
+        answer = TRANSFER_MSG
         transfer = True
-    return {"answer": answer, "sources": sources, "intent": "knowledge", "transfer": transfer}
-
-
-def business_node(state: AgentState) -> dict:
-    answer, transfer = _handle_business(state.get("last_user", ""))
-    return {"answer": answer, "sources": [], "intent": "business", "transfer": transfer}
-
-
-def chitchat_node(state: AgentState) -> dict:
-    answer, transfer = _handle_chitchat(state.get("last_user", ""))
-    return {"answer": answer, "sources": [], "intent": "chitchat", "transfer": transfer}
-
-
-def handoff_node(state: AgentState) -> dict:
-    return {"answer": TRANSFER_MSG, "sources": [], "intent": "human", "transfer": True}
-
-
-def _route_after(state: AgentState) -> str:
-    if state.get("blocked"):
-        return "blocked"
-    return state.get("intent", "knowledge")
-
-
-def _build_graph():
-    g = StateGraph(AgentState)
-    g.add_node("guard_route", guard_route)
-    g.add_node("rag", rag_node)
-    g.add_node("business", business_node)
-    g.add_node("chitchat", chitchat_node)
-    g.add_node("handoff", handoff_node)
-    g.add_edge(START, "guard_route")
-    g.add_conditional_edges(
-        "guard_route",
-        _route_after,
-        {
-            "knowledge": "rag",
-            "business": "business",
-            "chitchat": "chitchat",
-            "human": "handoff",
-            "blocked": END,
-        },
-    )
-    g.add_edge("rag", END)
-    g.add_edge("business", END)
-    g.add_edge("chitchat", END)
-    g.add_edge("handoff", END)
-    return g.compile()
-
-
-_GRAPH = _build_graph()
+    else:  # chitchat
+        answer, transfer = _handle_chitchat(message)
+    sources = _sources_from(contexts) if contexts else []
+    return {
+        "intent": intent,
+        "answer": answer,
+        "sources": sources,
+        "transfer": transfer,
+        "contexts": contexts,
+        "blocked": False,
+    }
 
 
 def handle(session_id: str, message: str) -> dict:
     message = (message or "").strip()
-    init: AgentState = {
-        "session_id": session_id,
-        "last_user": message,
-        "history": _memory.history_text(session_id),
-        "blocked": False,
-    }
-    result = _GRAPH.invoke(init)
-    answer = result.get("answer", "")
-    sources = result.get("sources", [])
-    intent = result.get("intent", "knowledge")
-    transfer = result.get("transfer", False)
-    _memory.add(session_id, "user", message)
-    _memory.add(session_id, "assistant", answer)
+    p = plan(session_id, message)
+    answer = p["answer"]
+    if answer is None:  # 知识问答需要生成
+        answer = generate(message, p["contexts"], _memory.history_text(session_id))
+    remember(session_id, message, answer)
     return {
         "answer": answer,
-        "sources": sources,
-        "intent": intent,
-        "transfer": transfer,
+        "sources": p["sources"],
+        "intent": p["intent"],
+        "transfer": p["transfer"],
         "mock": USE_MOCK_LLM,
     }
+
+
+def remember(session_id: str, user_msg: str, answer: str):
+    """把一轮对话写入多轮记忆（供 handle 与流式接口共用）。"""
+    _memory.add(session_id, "user", user_msg)
+    _memory.add(session_id, "assistant", answer)
 
 
 def reset(session_id: str):

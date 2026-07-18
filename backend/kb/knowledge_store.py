@@ -234,9 +234,16 @@ class KnowledgeStore:
     def delete_entry(self, eid: str) -> bool:
         if eid.startswith("user::"):
             ok = user_kb.delete_user_entry(eid.split("::", 1)[1])
-        else:
+        elif eid.startswith("seed::"):
             user_kb.exclude_seed(eid)
             ok = True
+        else:
+            # 兼容 add_user_entry 返回的纯 user id（不含 "user::" 前缀）
+            if user_kb.delete_user_entry(eid):
+                ok = True
+            else:
+                user_kb.exclude_seed("seed::" + eid)
+                ok = True
         if ok:
             self._build()
         return ok

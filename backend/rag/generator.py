@@ -105,3 +105,33 @@ def generate(question: str, contexts: list[dict], history: str = "") -> str:
             src = contexts[0]["metadata"].get("source", "知识库")
             return f"{ans}\n\n参考来源：{src}"
         return "抱歉，处理失败，请联系人工客服。"
+
+
+async def generate_stream(question: str, contexts: list[dict], history: str = ""):
+    """异步流式生成（异步生成器，逐块 yield）。
+
+    - 真实模式：ChatOpenAI(streaming=True) + chain.astream 逐 token 产出
+    - mock 模式：整段 yield（由调用方做打字机切分）
+    调用方负责把各块累积为完整文本并写入记忆。
+    """
+    context_str = _format_context(contexts)
+    if USE_MOCK_LLM:
+        yield generate(question, contexts, history)
+        return
+    try:
+        llm = ChatOpenAI(
+            model=LLM_MODEL,
+            api_key=LLM_API_KEY,
+            base_url=LLM_BASE_URL,
+            temperature=0.3,
+            streaming=True,
+        )
+        chain = PROMPT | llm | StrOutputParser()
+        async for chunk in chain.astream(
+            {"history": history, "context": context_str, "question": question}
+        ):
+            if chunk:
+                yield chunk
+    except Exception as e:
+        print(f"[warn] 流式生成失败，回退整段：{e}")
+        yield generate(question, contexts, history)

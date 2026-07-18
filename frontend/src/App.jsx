@@ -143,7 +143,7 @@ export default function App() {
     const uid = genId()
     const aid = genId()
     const userMsg = { id: uid, role: 'user', text: t }
-    const botMsg = { id: aid, role: 'assistant', text: '', intent: '', sources: [], transfer: false, streaming: true }
+    const botMsg = { id: aid, role: 'assistant', text: '', intent: '', sources: [], transfer: false, streaming: true, feedback: null }
     setSessions((prev) =>
       prev.map((s) =>
         s.id === sid
@@ -255,6 +255,34 @@ export default function App() {
     await refreshStats()
   }
 
+  // 消息反馈（赞/踩）
+  const onFeedback = (mid, val) => {
+    const sid = currentId
+    if (!sid) return
+    patchMsg(sid, mid, { feedback: val })
+  }
+
+  // 导出当前对话为 Markdown
+  const exportCurrent = () => {
+    if (!current || !current.messages.length) return
+    const lines = [`# ${current.title || 'WHZ 智能客服对话'}`, '']
+    for (const m of current.messages) {
+      if (m.role === 'user') lines.push(`**用户**：${m.text}`)
+      else lines.push(`**WHZ 智能客服**：${m.text}`)
+      lines.push('')
+    }
+    lines.push('---', `_导出时间：${new Date().toLocaleString()}_`)
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `whz-对话-${(current.title || 'chat').slice(0, 12)}.md`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
   const openKbFromSidebar = openKb
 
   return (
@@ -280,6 +308,7 @@ export default function App() {
         onDelete={deleteSession}
         stats={stats}
         onOpenKb={openKbFromSidebar}
+        onExport={exportCurrent}
       />
 
       <main className="main">
@@ -317,7 +346,9 @@ export default function App() {
                 </div>
               </div>
             ) : (
-              current.messages.map((m) => <Message key={m.id} msg={m} />)
+              current.messages.map((m) => (
+                <Message key={m.id} msg={m} onFeedback={(v) => onFeedback(m.id, v)} />
+              ))
             )}
           </div>
         </div>

@@ -12,6 +12,10 @@ __pycache__/
 # ===== 用户上传（临时文件，不入库） =====
 kb/uploads/
 
+# ===== 运行时用户知识库数据（本地状态，不入库） =====
+kb/user_entries.json
+kb/excluded_seed.json
+
 # ===== 前端依赖（构建产物 dist 需入库，供 Render 直接托管） =====
 frontend/node_modules/
 frontend/.vite/

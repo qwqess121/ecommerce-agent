@@ -16,7 +16,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from backend.config import HOST, PORT, USE_MOCK_LLM, UPLOAD_DIR, ROOT_DIR
-from backend.agent.orchestrator import handle, reset
+from backend.agent.orchestrator import handle, reset, plan, remember, _memory
+from backend.rag.generator import generate, generate_stream
 from backend.kb.knowledge_store import get_store, rebuild
 from backend.ingest import ingest_file
 from backend.config import UPLOAD_DIR
@@ -90,21 +91,45 @@ def chat(req: ChatReq):
 
 @app.post("/chat/stream")
 async def chat_stream(req: ChatReq):
-    """SSE 流式对话：先发 meta（意图/来源/转人工），再逐块发 delta，最后 done。"""
+    """SSE 流式对话。
+
+    流程：先发 meta（意图/来源/转人工）-> 知识问答逐 token 流出（真实模式 astream；
+    mock 模式按标点切分模拟打字机）-> 业务/闲聊/转人工直接切分既定答案 -> 发 done。
+    """
     async def gen():
-        # 复用编排器得到完整结果（含记忆写入）
-        result = handle(req.session_id, req.message)
+        p = plan(req.session_id, req.message)
         meta = {
-            "intent": result.get("intent", "knowledge"),
-            "sources": result.get("sources", []),
-            "transfer": result.get("transfer", False),
-            "mock": result.get("mock", USE_MOCK_LLM),
+            "intent": p["intent"],
+            "sources": p["sources"],
+            "transfer": p["transfer"],
+            "mock": USE_MOCK_LLM,
         }
         yield f"event: meta\ndata: {json.dumps(meta, ensure_ascii=False)}\n\n"
-        answer = result.get("answer", "") or ""
-        for piece in chunk_text(answer):
-            yield f"event: delta\ndata: {json.dumps(piece, ensure_ascii=False)}\n\n"
-            await asyncio.sleep(0.018)
+
+        answer = p["answer"]  # 业务/闲聊/转人工/拦截 已确定；知识问答为 None
+        history = _memory.history_text(req.session_id)
+
+        if answer is None:
+            # 知识问答：需生成。真实模式逐 token 流；mock 模式整段后切分
+            if USE_MOCK_LLM:
+                full = generate(req.message, p["contexts"], history)
+                answer = full
+                for piece in chunk_text(full):
+                    yield f"event: delta\ndata: {json.dumps(piece, ensure_ascii=False)}\n\n"
+                    await asyncio.sleep(0.018)
+            else:
+                buf = ""
+                async for tok in generate_stream(req.message, p["contexts"], history):
+                    buf += tok
+                    yield f"event: delta\ndata: {json.dumps(tok, ensure_ascii=False)}\n\n"
+                answer = buf
+        else:
+            answer = answer or ""
+            for piece in chunk_text(answer):
+                yield f"event: delta\ndata: {json.dumps(piece, ensure_ascii=False)}\n\n"
+                await asyncio.sleep(0.018)
+
+        remember(req.session_id, req.message, answer or "")
         yield "event: done\ndata: {}\n\n"
 
     return StreamingResponse(

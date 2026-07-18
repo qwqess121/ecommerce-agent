@@ -1,4 +1,4 @@
-export default function Message({ msg }) {
+export default function Message({ msg, onFeedback }) {
   if (msg.role === 'user') {
     return (
       <div className="msg user">
@@ -9,6 +9,10 @@ export default function Message({ msg }) {
   }
 
   const intent = msg.intent || ''
+  const copy = () => {
+    const text = (msg.text || '').replace(/\s+/g, ' ').trim()
+    if (navigator.clipboard) navigator.clipboard.writeText(text).catch(() => {})
+  }
   return (
     <div className="msg bot">
       <div className="avatar bot">AI</div>
@@ -18,9 +22,36 @@ export default function Message({ msg }) {
           {msg.streaming && <span className="stream-caret" />}
         </div>
 
+        <div className="msg-actions">
+          <button className="mini" title="复制回答" onClick={copy}>⧉ 复制</button>
+          {!msg.streaming && (
+            <>
+              <button
+                className={`mini ${msg.feedback === 'up' ? 'on' : ''}`}
+                title="有帮助"
+                onClick={() => onFeedback && onFeedback('up')}
+              >
+                👍
+              </button>
+              <button
+                className={`mini ${msg.feedback === 'down' ? 'on' : ''}`}
+                title="没帮助"
+                onClick={() => onFeedback && onFeedback('down')}
+              >
+                👎
+              </button>
+            </>
+          )}
+        </div>
+
         {intent && (
           <div className="meta">
             <span className={`tag ${intent}`}>意图 · {intent}</span>
+            {msg.feedback && (
+              <span className={`fb ${msg.feedback}`}>
+                {msg.feedback === 'up' ? '已赞' : '已踩'}
+              </span>
+            )}
           </div>
         )}
 
